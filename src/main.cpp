@@ -92,6 +92,44 @@ void clean_memory() {
     checkCudaErrors(cudaFree(d_seeds_comp));
 }
 
+float point_segment_distance_cpu(Vertice p0, Vertice pa, Vertice pb) {
+    Vertice vab = pb - pa;
+    Vertice vap = p0 - pa;
+
+    float m2_AB = vab.mag2();
+    float lambda = vab * vap / m2_AB;
+    if (lambda < 0) lambda = 0;
+    else if (lambda > 1) lambda = 1;
+
+    Vertice pc = { pa.x + lambda * vab.x, pa.y + lambda * vab.y, pa.z + lambda * vab.z };
+    return Vertice::dist(pc, p0);
+}
+
+float point_triangle_distance_cpu(Vertice p0, Vertice p1, Vertice p2, Vertice p3) {
+    Vertice v31 = p1 - p3;
+    Vertice v32 = p2 - p3;
+    Vertice v30 = p0 - p3;
+    float m31 = v31.mag2();
+    float m32 = v32.mag2();
+    float d = v31 * v32;
+
+    float invdet = 1.0f/std::max(m31 * m32 - d * d, 1e-30f);
+    float a = v31 * v30, b = v32 * v30;
+    float w23 = invdet * (m32 * a - d * b);
+    float w31 = invdet * (m31 * b - d * a);
+    float w12 = 1 - w23 - w31;
+    if(w23 >= 0 && w31 >= 0 && w12 >= 0){
+        return Vertice::dist(p0, w23 * p1 + w31 * p2 + w12 * p3);
+    } else {
+        if(w23 > 0)
+            return std::min(point_segment_distance_cpu(p0, p1, p2), point_segment_distance_cpu(p0, p1, p3));
+        else if(w31>0)
+            return std::min(point_segment_distance_cpu(p0, p1, p2), point_segment_distance_cpu(p0, p2, p3));
+        else
+            return std::min(point_segment_distance_cpu(p0, p1, p3), point_segment_distance_cpu(p0, p2, p3));
+    }
+}
+
 void run(const char* stl_file, const char* output_file) {
     sdkCreateTimer(&timer);
 
@@ -119,6 +157,19 @@ void run(const char* stl_file, const char* output_file) {
     init_env();
 
     last_time = timer->getTime();
+
+    // for (int i = 0; i < 1000; i++) {
+    //     float3 coord = field_grid.coordinate2(i, field_grid.grid_size_shift, field_grid.grid_size_mask);
+    //     Vertice p0 = { coord.x, coord.y, coord.z };
+    //     for (int j = 0; j < triangles.size(); j++) {
+    //         float d = point_triangle_distance_cpu(p0, triangles[j].vertices[0], triangles[j].vertices[1], triangles[j].vertices[2]);
+    //         if (d < field[i]) field[i] = d;
+    //     }
+    // }
+    // printf("cpu brute: %f ms.\n", (timer->getTime() - last_time) / 1000.0 * field_grid.num_grid_points);
+    //
+    // last_time = timer->getTime();
+
     if (jfa == 0) {
         make_sdf_brute(d_field, d_grid, d_triangles, triangles.size(), field_grid.num_grid_points);
         cudaDeviceSynchronize();
